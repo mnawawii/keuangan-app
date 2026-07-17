@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { supabase } from './lib/supabaseClient'
+import { generateRecurringTransactions } from './lib/recurring'
 import Auth from './Auth'
 import Dashboard from './components/Dashboard'
 import Profile from './components/Profile'
@@ -9,6 +10,7 @@ function App() {
   const [authLoading, setAuthLoading] = useState(true)
   const [transactions, setTransactions] = useState([])
   const [categories, setCategories] = useState([])
+  const [recurring, setRecurring] = useState([])
   const [profile, setProfile] = useState(null)
   const [view, setView] = useState('dashboard')
 
@@ -26,14 +28,22 @@ function App() {
   useEffect(() => {
     if (!user) return
     fetchCategories()
-    fetchTransactions()
     fetchProfile()
+
+    async function init() {
+      const txData = await fetchTransactions()
+      const recData = await fetchRecurring()
+      await generateRecurringTransactions(recData, txData, user.id)
+      await fetchTransactions()
+    }
+    init()
 
     const channel = supabase
       .channel('app-realtime')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'transactions' }, fetchTransactions)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'categories' }, fetchCategories)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'profiles' }, fetchProfile)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'recurring_transactions' }, fetchRecurring)
       .subscribe()
 
     return () => supabase.removeChannel(channel)
@@ -51,6 +61,16 @@ function App() {
       .order('transaction_date', { ascending: false })
       .order('created_at', { ascending: false })
     setTransactions(data || [])
+    return data || []
+  }
+
+  async function fetchRecurring() {
+    const { data } = await supabase
+      .from('recurring_transactions')
+      .select('*, categories(name, group_type)')
+      .order('day_of_month')
+    setRecurring(data || [])
+    return data || []
   }
 
   async function fetchProfile() {
@@ -69,6 +89,10 @@ function App() {
     await supabase.from('transactions').insert({ ...payload, user_id: user.id })
   }
 
+  async function updateTransaction(id, payload) {
+    await supabase.from('transactions').update(payload).eq('id', id)
+  }
+
   async function deleteTransaction(id) {
     await supabase.from('transactions').delete().eq('id', id)
   }
@@ -85,7 +109,30 @@ function App() {
       { name: 'Investasi', group_type: 'savings' },
     ]
     await supabase.from('categories').insert(defaults.map((d) => ({ ...d, user_id: user.id })))
-    fetchCategories()
+  }
+
+  async function addCategory(payload) {
+    await supabase.from('categories').insert({ ...payload, user_id: user.id })
+  }
+
+  async function updateCategory(id, payload) {
+    await supabase.from('categories').update(payload).eq('id', id)
+  }
+
+  async function deleteCategory(id) {
+    await supabase.from('categories').delete().eq('id', id)
+  }
+
+  async function addRecurring(payload) {
+    await supabase.from('recurring_transactions').insert({ ...payload, user_id: user.id })
+  }
+
+  async function updateRecurring(id, payload) {
+    await supabase.from('recurring_transactions').update(payload).eq('id', id)
+  }
+
+  async function deleteRecurring(id) {
+    await supabase.from('recurring_transactions').delete().eq('id', id)
   }
 
   if (authLoading) return null
@@ -119,9 +166,17 @@ function App() {
           profile={profile}
           transactions={transactions}
           categories={categories}
+          recurring={recurring}
           onAddTransaction={addTransaction}
+          onUpdateTransaction={updateTransaction}
           onDeleteTransaction={deleteTransaction}
           onAddDefaultCategories={addDefaultCategories}
+          onAddCategory={addCategory}
+          onUpdateCategory={updateCategory}
+          onDeleteCategory={deleteCategory}
+          onAddRecurring={addRecurring}
+          onUpdateRecurring={updateRecurring}
+          onDeleteRecurring={deleteRecurring}
         />
       ) : (
         <Profile user={user} profile={profile} transactions={transactions} onSaveProfile={saveProfile} />

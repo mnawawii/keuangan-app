@@ -1,5 +1,9 @@
 import { useState, useMemo } from 'react'
 import { downloadMonthlyReport } from '../lib/pdf'
+import { exportMonthlyCSV, exportMonthlyExcel } from '../lib/exportData'
+import CategoryManager from './CategoryManager'
+import RecurringManager from './RecurringManager'
+import CategoryPieChart from './CategoryPieChart'
 
 const TARGETS = { needs: 50, wants: 30, savings: 20 }
 const GROUP_LABEL = { needs: 'Kebutuhan', wants: 'Keinginan', savings: 'Tabungan' }
@@ -19,16 +23,28 @@ export default function Dashboard({
   profile,
   transactions,
   categories,
+  recurring,
   onAddTransaction,
+  onUpdateTransaction,
   onDeleteTransaction,
   onAddDefaultCategories,
+  onAddCategory,
+  onUpdateCategory,
+  onDeleteCategory,
+  onAddRecurring,
+  onUpdateRecurring,
+  onDeleteRecurring,
 }) {
   const [cursorDate, setCursorDate] = useState(new Date())
   const [amount, setAmount] = useState('')
   const [note, setNote] = useState('')
   const [type, setType] = useState('expense')
   const [categoryId, setCategoryId] = useState('')
+  const [editingId, setEditingId] = useState(null)
+  const [editDate, setEditDate] = useState('')
   const [saving, setSaving] = useState(false)
+  const [showCategoryManager, setShowCategoryManager] = useState(false)
+  const [showRecurringManager, setShowRecurringManager] = useState(false)
 
   const currentMonthKey = monthKey(cursorDate)
 
@@ -103,24 +119,45 @@ export default function Dashboard({
     }
   }, [totals])
 
+  function resetForm() {
+    setAmount('')
+    setNote('')
+    setCategoryId('')
+    setEditingId(null)
+    setEditDate('')
+    setType('expense')
+  }
+
+  function startEditTx(t) {
+    setEditingId(t.id)
+    setType(t.type)
+    setAmount(String(t.amount))
+    setNote(t.note || '')
+    setCategoryId(t.category_id || '')
+    setEditDate(t.transaction_date)
+  }
+
   async function handleSubmit(e) {
     e.preventDefault()
     if (!amount) return
     setSaving(true)
-    await onAddTransaction({
-      category_id: categoryId || null,
+    const payload = {
+      category_id: type === 'expense' ? categoryId || null : null,
       type,
       amount: parseFloat(amount),
       note,
-      transaction_date: new Date().toISOString().slice(0, 10),
-    })
-    setAmount('')
-    setNote('')
-    setCategoryId('')
+      transaction_date: editingId ? editDate : new Date().toISOString().slice(0, 10),
+    }
+    if (editingId) {
+      await onUpdateTransaction(editingId, payload)
+    } else {
+      await onAddTransaction(payload)
+    }
+    resetForm()
     setSaving(false)
   }
 
-  function handleDownload() {
+  function handleDownloadPDF() {
     downloadMonthlyReport({
       userName: profile?.full_name,
       userEmail: user.email,
@@ -137,14 +174,11 @@ export default function Dashboard({
         <button aria-label="Bulan sebelumnya" onClick={() => setCursorDate(new Date(cursorDate.getFullYear(), cursorDate.getMonth() - 1, 1))}>‹</button>
         <span className="month-label">{monthLabel(cursorDate)}</span>
         <button aria-label="Bulan berikutnya" onClick={() => setCursorDate(new Date(cursorDate.getFullYear(), cursorDate.getMonth() + 1, 1))}>›</button>
-        <button className="btn-download" onClick={handleDownload}>
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-            <polyline points="7 10 12 15 17 10" />
-            <line x1="12" y1="15" x2="12" y2="3" />
-          </svg>
-          Unduh Laporan PDF
-        </button>
+        <div className="export-group">
+          <button onClick={handleDownloadPDF}>PDF</button>
+          <button onClick={() => exportMonthlyCSV(monthTransactions, monthLabel(cursorDate))}>CSV</button>
+          <button onClick={() => exportMonthlyExcel(monthTransactions, monthLabel(cursorDate))}>Excel</button>
+        </div>
       </div>
 
       <div className="hero-card">
@@ -209,9 +243,20 @@ export default function Dashboard({
         })}
       </div>
 
+      <div className="panel chart-panel">
+        <div className="panel-title">Distribusi Pengeluaran per Kategori</div>
+        <CategoryPieChart transactions={monthTransactions} />
+      </div>
+
       <div className="content-grid">
         <div className="panel">
-          <div className="panel-title">Tambah Transaksi</div>
+          <div className="panel-title-row">
+            <div className="panel-title">{editingId ? 'Ubah Transaksi' : 'Tambah Transaksi'}</div>
+            <div className="panel-title-actions">
+              <button className="link-btn" onClick={() => setShowCategoryManager(true)}>Kelola Kategori</button>
+              <button className="link-btn" onClick={() => setShowRecurringManager(true)}>Berulang</button>
+            </div>
+          </div>
 
           {categories.length === 0 && (
             <div className="empty-cta">
@@ -227,7 +272,11 @@ export default function Dashboard({
               <button type="button" className={type === 'expense' ? 'active expense' : ''} onClick={() => setType('expense')}>
                 Pengeluaran
               </button>
-              <button type="button" className={type === 'income' ? 'active income' : ''} onClick={() => setType('income')}>
+              <button
+                type="button"
+                className={type === 'income' ? 'active income' : ''}
+                onClick={() => { setType('income'); setCategoryId('') }}
+              >
                 Pemasukan
               </button>
             </div>
@@ -256,9 +305,21 @@ export default function Dashboard({
               <input type="text" placeholder="Opsional" value={note} onChange={(e) => setNote(e.target.value)} />
             </div>
 
+            {editingId && (
+              <div className="field">
+                <label>Tanggal</label>
+                <input type="date" value={editDate} onChange={(e) => setEditDate(e.target.value)} required />
+              </div>
+            )}
+
             <button className="btn btn-primary" type="submit" disabled={saving}>
-              {saving ? 'Menyimpan...' : 'Simpan Transaksi'}
+              {saving ? 'Menyimpan...' : editingId ? 'Simpan Perubahan' : 'Simpan Transaksi'}
             </button>
+            {editingId && (
+              <button type="button" className="btn btn-ghost btn-small" onClick={resetForm} style={{ marginTop: 8, width: '100%' }}>
+                Batal Ubah
+              </button>
+            )}
           </form>
         </div>
 
@@ -276,21 +337,42 @@ export default function Dashboard({
                     <div className="tx-meta">
                       <span>{new Date(t.transaction_date).toLocaleDateString('id-ID', { day: 'numeric', month: 'short' })}</span>
                       {t.categories && <span className={`category-badge ${t.categories.group_type}`}>{t.categories.name}</span>}
+                      {t.recurring_id && <span className="category-badge savings">Otomatis</span>}
                     </div>
                   </div>
                   <span className={`tx-amount ${t.type}`}>
                     {t.type === 'income' ? '+' : '-'}
                     {formatRupiah(t.amount)}
                   </span>
-                  <button className="tx-delete" onClick={() => onDeleteTransaction(t.id)} aria-label="Hapus transaksi">
-                    ✕
-                  </button>
+                  <button className="tx-edit" onClick={() => startEditTx(t)} aria-label="Ubah transaksi">✎</button>
+                  <button className="tx-delete" onClick={() => onDeleteTransaction(t.id)} aria-label="Hapus transaksi">✕</button>
                 </div>
               ))}
             </div>
           )}
         </div>
       </div>
+
+      {showCategoryManager && (
+        <CategoryManager
+          categories={categories}
+          onAdd={onAddCategory}
+          onUpdate={onUpdateCategory}
+          onDelete={onDeleteCategory}
+          onClose={() => setShowCategoryManager(false)}
+        />
+      )}
+
+      {showRecurringManager && (
+        <RecurringManager
+          recurring={recurring}
+          categories={categories}
+          onAdd={onAddRecurring}
+          onUpdate={onUpdateRecurring}
+          onDelete={onDeleteRecurring}
+          onClose={() => setShowRecurringManager(false)}
+        />
+      )}
     </>
   )
 }

@@ -1,5 +1,7 @@
 import { useState, useMemo, useEffect } from 'react'
 import { downloadYearlyReport } from '../lib/pdf'
+import { exportYearlyCSV, exportYearlyExcel } from '../lib/exportData'
+import YearlyTrendChart from './YearlyTrendChart'
 
 function formatRupiah(n) {
   return 'Rp ' + Number(n || 0).toLocaleString('id-ID')
@@ -69,7 +71,7 @@ export default function Profile({ user, profile, transactions, onSaveProfile }) 
     setEditing(false)
   }
 
-  function handleDownload() {
+  function handleDownloadPDF() {
     downloadYearlyReport({
       userName: profile?.full_name,
       userEmail: user.email,
@@ -126,14 +128,11 @@ export default function Profile({ user, profile, transactions, onSaveProfile }) 
         <button aria-label="Tahun sebelumnya" onClick={() => setYear(year - 1)}>‹</button>
         <span className="month-label">{year}</span>
         <button aria-label="Tahun berikutnya" onClick={() => setYear(year + 1)}>›</button>
-        <button className="btn-download" onClick={handleDownload}>
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-            <polyline points="7 10 12 15 17 10" />
-            <line x1="12" y1="15" x2="12" y2="3" />
-          </svg>
-          Unduh Laporan Tahunan PDF
-        </button>
+        <div className="export-group">
+          <button onClick={handleDownloadPDF}>PDF</button>
+          <button onClick={() => exportYearlyCSV(monthlyRows, year)}>CSV</button>
+          <button onClick={() => exportYearlyExcel(monthlyRows, year)}>Excel</button>
+        </div>
       </div>
 
       <div className="hero-card">
@@ -155,6 +154,11 @@ export default function Profile({ user, profile, transactions, onSaveProfile }) 
             </div>
           </div>
         </div>
+      </div>
+
+      <div className="panel chart-panel">
+        <div className="panel-title">Tren Pemasukan & Pengeluaran</div>
+        <YearlyTrendChart monthlyRows={monthlyRows} />
       </div>
 
       <div className="panel">
